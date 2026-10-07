@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <!-- Kết nối với manifest -->
+<link rel="manifest" href="manifest.json">
+
+<!-- Tối ưu hóa giao diện độc lập cho iOS (Quan trọng) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tên Ứng Dụng">
+<link rel="apple-touch-icon" href="icon-192.png">
+
+<!-- Khởi chạy Service Worker -->
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js')
+      .then(() => console.log('PWA đã sẵn sàng!'))
+      .catch((err) => console.log('Lỗi đăng ký:', err));
+  }
+</script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Giám Sát Thủy Lợi & Camera</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 12px; }
+        .container { max-width: 480px; margin: auto; }
+        h2 { color: #ffffff; background: #0056b3; padding: 15px 10px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin-top: 5px; font-size: 18px; text-align: center; }
+        .station-box { background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; box-shadow: 0 3px 8px rgba(0,0,0,0.06); }
+        
+        .station-header { font-size: 16px; font-weight: bold; color: #111; border-bottom: 2px solid #f0f4f8; padding-bottom: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .station-title { display: flex; align-items: center; }
+        .btn-camera { background: #007bff; color: white; border: none; padding: 4px 8px; border-radius: 6px; font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: 0.2s; }
+        .btn-camera:hover { background: #0056b3; }
+        
+        /* Khung hiển thị Camera tỉ lệ 16:9 */
+        .camera-container { display: none; margin-bottom: 10px; background: #000; border-radius: 8px; overflow: hidden; position: relative; padding-top: 56.25%; }
+        .camera-container iframe, .camera-container img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; object-fit: contain; background: #000; }
+        
+        .tag-card { background: #eef5ff; padding: 10px 12px; border-radius: 8px; margin: 6px 0; border-left: 5px solid #007bff; display: flex; justify-content: space-between; align-items: center; }
+        .tag-title { font-weight: bold; color: #444; font-size: 13px; }
+        .tag-value-container { text-align: right; }
+        .tag-value { font-size: 18px; font-weight: bold; color: #0056b3; }
+        .tag-unit { font-size: 12px; color: #666; margin-left: 3px; display: inline-block; width: 40px; text-align: left; }
+        .time { font-size: 10px; color: #aaa; text-align: right; margin-top: 6px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📱 GIÁM SÁT THỦY LỢI</h2>
+    <div id="dashboard_container">
+        <p style="text-align:center; color:#666;">Đang đồng bộ dữ liệu liên tục...</p>
+    </div>
+</div>
+<script>
+    const PUBLIC_IP = "113.161.81.55"
+    let cachedStations = [];
+
+    // Bật/tắt camera khi bấm nút đối diện tên trạm
+    function toggleCamera(stationId) {
+        const camDiv = document.getElementById(`cam-${stationId}`);
+        if (camDiv.style.display === "none" || camDiv.style.display === "") {
+            camDiv.style.display = "block";
+        } else {
+            camDiv.style.display = "none";
+        }
+    }
+
+    async function loadDynamicStationList() {
+        try {
+            const response = await fetch(`https://${PUBLIC_IP}:8082/api/v1/stations?_=${Date.now()}`);
+            if (response.ok) cachedStations = await response.json();
+        } catch (e) { 
+            console.log("Lỗi tải danh sách trạm."); 
+        }
+    }
+
+    async function fetchAllStationsData() {
+        if (cachedStations.length === 0) return;
+
+        const promises = cachedStations.map(async (station) => {
+            const existingCam = document.getElementById(`cam-${station.id}`);
+            const isCamVisible = existingCam ? existingCam.style.display : "none";
+
+            try {
+                const response = await fetch(`https://${PUBLIC_IP}:8082/api/v1/stationdata?station_id=${station.id}&_=${Date.now()}`);
+                const result = await response.json();
+                
+                if (response.ok && result.data) {
+                    let tagsHtml = "";
+                    let lastUpdateTime = "---";
+
+                    for (const [key, tag] of Object.entries(result.data)) {
+                        let displayValue = tag.value !== null && tag.value !== "" ? parseFloat(tag.value).toFixed(2) : "---";
+                        let displayUnit = tag.unit ? tag.unit : "";
+                        if (tag.timestamp) { lastUpdateTime = tag.timestamp; }
+
+                        tagsHtml += `
+                            <div class="tag-card">
+                                <div class="tag-title">${key}</div>
+                                <div class="tag-value-container">
+                                    <span class="tag-value">${displayValue}</span>
+                                    <span class="tag-unit">${displayUnit}</span>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // XỬ LÝ NHẬN DIỆN SOURCE VIDEO TỪ CAMERA THỰC TẾ
+                    let cameraTagHtml = "";
+                    
+                    // Giả định API trả về kiểu stream của trạm ('mjpeg' hoặc 'rtsp')
+                    // Bạn cũng có thể cấu hình cứng dựa theo station.id nếu muốn
+                    const streamType = result.stream_type || station.stream_type || "mjpeg"; 
+
+                    if (streamType === "mjpeg") {
+                        // LUỒNG 1: Sử dụng trực tiếp link MJPEG của camera qua thẻ <img>
+                        // Nếu xem từ xa qua 5G, hãy đảm bảo "IP camera" đã được NAT ra IP công cộng hoặc chạy qua Proxy của cổng 8082
+                        const mjpegUrl = result.video_url || `https://${PUBLIC_IP}/videostream.cgi?user=admin&pwd=xxxx`;
+                        cameraTagHtml = `<img src="${mjpegUrl}" alt="Mjpeg Camera Stream" />`;
+                    } else {
+                        // LUỒNG 2: Đối với RTSP đầu ghi Hikvision/Dahua, Frontend gọi qua luồng stream đã chuyển đổi của Server cổng 8082
+                        const proxyRtspUrl = `https://${PUBLIC_IP}:8082/api/v1/camera/stream?station_id=${station.id}`;
+                        cameraTagHtml = `<iframe src="${proxyRtspUrl}" allowfullscreen></iframe>`;
+                    }
+
+                    return `
+                        <div class="station-box">
+                            <div class="station-header">
+                                <span class="station-title">📍 ${result.station_name || station.name}</span>
+                                <button class="btn-camera" onclick="toggleCamera('${station.id}')">📷 Xem Cam</button>
+                            </div>
+                            
+                            <div class="camera-container" id="cam-${station.id}" style="display: ${isCamVisible};">
+                                ${cameraTagHtml}
+                            </div>
+
+                            ${tagsHtml}
+                            <div class="time">Cập nhật: ${lastUpdateTime}</div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                return `
+                    <div class="station-box" style="border: 1px dashed #dc3545;">
+                        <div class="station-header">
+                            <span style="color:#dc3545;">📍 Trạm: ${station.name}</span>
+                        </div>
+                        <p style="color:#dc3545; font-size:12px; margin:5px 0 0 0;">⚠️ Kết nối chưa sẵn sàng!</p>
+                    </div>
+                `;
+            }
+            return ""; 
+        });
+
+        const htmlResults = await Promise.all(promises);
+        document.getElementById("dashboard_container").innerHTML = htmlResults.join("");
+    }
+
+    async function startApp() {
+        await loadDynamicStationList();
+        await fetchAllStationsData();
+        setInterval(fetchAllStationsData, 2000);
+    }
+    
+    startApp();
+</script>
+</body>
+</html>
