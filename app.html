@@ -69,7 +69,7 @@
 
     async function loadDynamicStationList() {
         try {
-            const response = await fetch(`https://${PUBLIC_IP}:8082/api/v1/stations?_=${Date.now()}`);
+            const response = await fetch(`https://${PUBLIC_IP}/api/v1/stations?_=${Date.now()}`);
             if (response.ok) cachedStations = await response.json();
         } catch (e) { 
             console.log("Lỗi tải danh sách trạm."); 
@@ -84,7 +84,7 @@
             const isCamVisible = existingCam ? existingCam.style.display : "none";
 
             try {
-                const response = await fetch(`https://${PUBLIC_IP}:8082/api/v1/stationdata?station_id=${station.id}&_=${Date.now()}`);
+                const response = await fetch(`https://${PUBLIC_IP}/api/v1/stationdata?station_id=${station.id}&_=${Date.now()}`);
                 const result = await response.json();
                 
                 if (response.ok && result.data) {
@@ -121,7 +121,7 @@
                         cameraTagHtml = `<img src="${mjpegUrl}" alt="Mjpeg Camera Stream" />`;
                     } else {
                         // LUỒNG 2: Đối với RTSP đầu ghi Hikvision/Dahua, Frontend gọi qua luồng stream đã chuyển đổi của Server cổng 8082
-                        const proxyRtspUrl = `https://${PUBLIC_IP}:8082/api/v1/camera/stream?station_id=${station.id}`;
+                        const proxyRtspUrl = `https://${PUBLIC_IP}/api/v1/camera/stream?station_id=${station.id}`;
                         cameraTagHtml = `<iframe src="${proxyRtspUrl}" allowfullscreen></iframe>`;
                     }
 
